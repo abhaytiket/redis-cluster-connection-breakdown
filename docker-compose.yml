@@ -1,0 +1,150 @@
+name: redis-conn-breakdown
+
+x-redis-node: &redis-node
+  image: redis:8.6.7
+  volumes:
+    - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+  healthcheck:
+    test: ["CMD", "redis-cli", "ping"]
+    interval: 2s
+    timeout: 2s
+    retries: 30
+  restart: unless-stopped
+
+x-redis-app: &redis-app
+  build: ./app
+  image: redis-conn-breakdown/redis-app:local
+  restart: unless-stopped
+  depends_on:
+    redis-cluster-init:
+      condition: service_completed_successfully
+
+services:
+  # ---------------------------------------------------------------- Redis Cluster
+  redis-node-1:
+    <<: *redis-node
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--cluster-announce-hostname", "redis-node-1"]
+  redis-node-2:
+    <<: *redis-node
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--cluster-announce-hostname", "redis-node-2"]
+  redis-node-3:
+    <<: *redis-node
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--cluster-announce-hostname", "redis-node-3"]
+  redis-node-4:
+    <<: *redis-node
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--cluster-announce-hostname", "redis-node-4"]
+  redis-node-5:
+    <<: *redis-node
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--cluster-announce-hostname", "redis-node-5"]
+  redis-node-6:
+    <<: *redis-node
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--cluster-announce-hostname", "redis-node-6"]
+
+  # One-shot job: forms the cluster (3 primaries + 3 replicas) unless it already exists.
+  redis-cluster-init:
+    image: redis:8.6.7
+    depends_on:
+      redis-node-1: { condition: service_healthy }
+      redis-node-2: { condition: service_healthy }
+      redis-node-3: { condition: service_healthy }
+      redis-node-4: { condition: service_healthy }
+      redis-node-5: { condition: service_healthy }
+      redis-node-6: { condition: service_healthy }
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if redis-cli -h redis-node-1 cluster info | grep -q 'cluster_state:ok'; then
+          echo "Cluster already formed"; exit 0
+        fi
+        redis-cli --cluster create \
+          redis-node-1:6379 redis-node-2:6379 redis-node-3:6379 \
+          redis-node-4:6379 redis-node-5:6379 redis-node-6:6379 \
+          --cluster-replicas 1 --cluster-yes
+        for i in $$(seq 1 30); do
+          redis-cli -h redis-node-1 cluster info | grep -q 'cluster_state:ok' && { echo "Cluster is ready"; exit 0; }
+          sleep 1
+        done
+        echo "Cluster did not become ready"; exit 1
+    restart: "no"
+
+  # ------------------------------------------------------------------ Go clients
+  redis-app-1:
+    <<: *redis-app
+    environment:
+      CLIENT_NAME: redis-app-1
+      REDIS_ADDRS: redis-node-1:6379,redis-node-2:6379,redis-node-3:6379
+      POOL_SIZE: ${APP1_POOL_SIZE:-20}
+      MIN_IDLE_CONNS: ${APP1_MIN_IDLE_CONNS:-5}
+      WORKERS: ${APP1_WORKERS:-30}
+      RAMP_INTERVAL: ${APP1_RAMP_INTERVAL:-0s}
+
+  redis-app-2:
+    <<: *redis-app
+    environment:
+      CLIENT_NAME: redis-app-2
+      REDIS_ADDRS: redis-node-1:6379,redis-node-2:6379,redis-node-3:6379
+      POOL_SIZE: ${APP2_POOL_SIZE:-10}
+      MIN_IDLE_CONNS: ${APP2_MIN_IDLE_CONNS:-2}
+      WORKERS: ${APP2_WORKERS:-15}
+      RAMP_INTERVAL: ${APP2_RAMP_INTERVAL:-0s}
+
+  # Not started by `docker compose up`. Start it manually:
+  #   docker compose up -d redis-app-3
+  redis-app-3:
+    <<: *redis-app
+    profiles: ["manual"]
+    environment:
+      CLIENT_NAME: redis-app-3
+      REDIS_ADDRS: redis-node-1:6379,redis-node-2:6379,redis-node-3:6379
+      POOL_SIZE: ${APP3_POOL_SIZE:-40}
+      MIN_IDLE_CONNS: ${APP3_MIN_IDLE_CONNS:-0}
+      WORKERS: ${APP3_WORKERS:-60}
+      # Adds one worker every second so the connection count visibly ramps up.
+      RAMP_INTERVAL: ${APP3_RAMP_INTERVAL:-1s}
+
+  # ------------------------------------------------------------------ Observability
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.92.1
+    environment:
+      REDIS_EXPORTER_EXPORT_CLIENT_LIST: "true"
+      REDIS_EXPORTER_EXPORT_CLIENT_PORT: "false"
+      # Only multi-target /scrape is used; don't scrape a default local instance.
+      REDIS_ADDR: ""
+    ports:
+      - "9121:9121"
+    restart: unless-stopped
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.153.0
+    command:
+      - -promscrape.config=/etc/vm/scrape.yml
+      - -retentionPeriod=7d
+      - -search.latencyOffset=0s
+      - -storageDataPath=/storage
+    volumes:
+      - ./victoriametrics/scrape.yml:/etc/vm/scrape.yml:ro
+      - vm-data:/storage
+    ports:
+      - "8428:8428"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.4.13
+    depends_on:
+      - victoriametrics
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: 5s
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/redis-connections.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  vm-data:
+  grafana-data:
