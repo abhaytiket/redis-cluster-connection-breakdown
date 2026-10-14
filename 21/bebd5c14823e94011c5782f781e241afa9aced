@@ -1,0 +1,42 @@
+app/main.go
+  s_72472940be2282::t_910889736ca54e 57-62
+  s_72472940be2282::t_cdb62c71a825ec 134-135
+  s_72472940be2282::t_5b292da7b51475 1-56,63-133,136-205
+grafana/provisioning/datasources/victoriametrics.yml
+  s_72472940be2282::t_8f72f3de99168f 1-10
+docker-compose.yml
+  s_72472940be2282::t_39a761cdfaae8b 1-150
+redis/redis.conf
+  s_72472940be2282::t_8f72f3de99168f 1-12
+grafana/provisioning/dashboards/dashboards.yml
+  s_72472940be2282::t_8f72f3de99168f 1-8
+victoriametrics/scrape.yml
+  s_72472940be2282::t_8f72f3de99168f 1-30
+grafana/provisioning/dashboards/redis-connections.json
+  s_72472940be2282::t_41cfe8f81db92c 1-670
+README.md
+  s_72472940be2282::t_4fdf1b835f9307 2-92
+app/Dockerfile
+  s_72472940be2282::t_8f72f3de99168f 1-10
+app/go.mod
+  s_72472940be2282::t_da398e457d4dbc 3
+  s_72472940be2282::t_910889736ca54e 1-2,4-11
+app/go.sum
+  s_72472940be2282::t_9df59e18c54650 1-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.11",
+  "base_commit_sha": "21bebd5c14823e94011c5782f781e241afa9aced",
+  "prompts": {},
+  "sessions": {
+    "s_72472940be2282": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b2c565f2-1782-4277-b131-b95761a4f6c3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Abhay Joshi <abhay.joshi@tiket.com>"
+    }
+  }
+}
